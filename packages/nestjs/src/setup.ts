@@ -1,23 +1,7 @@
-import type {
-  ArgumentsHost,
-  CallHandler,
-  DynamicModule,
-  ExecutionContext,
-  NestInterceptor,
-  OnModuleInit,
-} from '@nestjs/common';
+import type { ArgumentsHost, CallHandler, DynamicModule, ExecutionContext, NestInterceptor } from '@nestjs/common';
 import { Catch, Global, HttpException, Injectable, Logger, Module } from '@nestjs/common';
 import { APP_INTERCEPTOR, BaseExceptionFilter } from '@nestjs/core';
-import {
-  SEMANTIC_ATTRIBUTE_SENTRY_OP,
-  SEMANTIC_ATTRIBUTE_SENTRY_ORIGIN,
-  captureException,
-  getClient,
-  getDefaultIsolationScope,
-  getIsolationScope,
-  spanToJSON,
-} from '@sentry/core';
-import type { Span } from '@sentry/types';
+import { captureException, getDefaultIsolationScope, getIsolationScope } from '@sentry/core';
 import { logger } from '@sentry/utils';
 import type { Observable } from 'rxjs';
 import { isExpectedError } from './helpers';
@@ -124,34 +108,6 @@ Catch()(SentryGlobalGraphQLFilter);
 export { SentryGlobalGraphQLFilter };
 
 /**
- * Service to set up Sentry performance tracing for Nest.js applications.
- */
-class SentryService implements OnModuleInit {
-  public readonly __SENTRY_INTERNAL__: boolean;
-
-  public constructor() {
-    this.__SENTRY_INTERNAL__ = true;
-  }
-
-  /**
-   * Initializes the Sentry service and registers span attributes.
-   */
-  public onModuleInit(): void {
-    // Sadly, NestInstrumentation has no requestHook, so we need to add the attributes here
-    // We register this hook in this method, because if we register it in the integration `setup`,
-    // it would always run even for users that are not even using Nest.js
-    const client = getClient();
-    if (client) {
-      client.on('spanStart', span => {
-        addNestSpanAttributes(span);
-      });
-    }
-  }
-}
-Injectable()(SentryService);
-export { SentryService };
-
-/**
  * Set up a root module that can be injected in nest applications.
  */
 class SentryModule {
@@ -162,42 +118,21 @@ class SentryModule {
     return {
       module: SentryModule,
       providers: [
-        SentryService,
         {
           provide: APP_INTERCEPTOR,
           useClass: SentryTracingInterceptor,
         },
       ],
-      exports: [SentryService],
     };
   }
 }
 Global()(SentryModule);
 Module({
   providers: [
-    SentryService,
     {
       provide: APP_INTERCEPTOR,
       useClass: SentryTracingInterceptor,
     },
   ],
-  exports: [SentryService],
 })(SentryModule);
 export { SentryModule };
-
-function addNestSpanAttributes(span: Span): void {
-  const attributes = spanToJSON(span).data || {};
-
-  // this is one of: app_creation, request_context, handler
-  const type = attributes['nestjs.type'];
-
-  // If this is already set, or we have no nest.js span, no need to process again...
-  if (attributes[SEMANTIC_ATTRIBUTE_SENTRY_OP] || !type) {
-    return;
-  }
-
-  span.setAttributes({
-    [SEMANTIC_ATTRIBUTE_SENTRY_ORIGIN]: 'auto.http.otel.nestjs',
-    [SEMANTIC_ATTRIBUTE_SENTRY_OP]: `${type}.nestjs`,
-  });
-}
